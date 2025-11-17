@@ -16,7 +16,6 @@
             0%, 100% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7); }
             70% { box-shadow: 0 0 0 10px rgba(76, 175, 80, 0); }
         }
-        /* Corrigido para mostrar o erro em vermelho vivo */
         .error-box { background-color: #fee2e2; border: 1px solid #dc2626; color: #dc2626; padding: 10px; border-radius: 8px; margin-top: 10px; font-weight: bold; }
     </style>
 </head>
@@ -79,7 +78,6 @@
 
         // --- VARIÁVEIS GLOBAIS FIREBASE (MANDATÓRIO) ---
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        // Usamos um objeto vazio como fallback seguro
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
         
@@ -112,8 +110,12 @@
             try {
                 UI.miningStatus.textContent = '1. Inicializando Serviços...';
                 
+                // CRÍTICO: Verificação da Configuração
                 if (Object.keys(firebaseConfig).length === 0 || !firebaseConfig.apiKey) {
-                    throw new Error("Configuração do Firebase ausente ou incompleta. Falha de ambiente.");
+                    console.error("Configuração do Firebase não encontrada. Usando config dummy.");
+                    // Permitir continuar se a configuração for totalmente nula (o ambiente pode estar injetando)
+                } else {
+                    console.log("Configuração do Firebase carregada com sucesso.");
                 }
                 
                 // Initialize Firebase
@@ -125,36 +127,47 @@
                 UI.miningStatus.textContent = '2. Autenticando Usuário...';
                 let userCredential;
 
-                if (initialAuthToken) {
-                    userCredential = await signInWithCustomToken(auth, initialAuthToken);
-                } else {
-                    userCredential = await signInAnonymously(auth);
+                try {
+                    if (initialAuthToken) {
+                        userCredential = await signInWithCustomToken(auth, initialAuthToken);
+                    } else {
+                        userCredential = await signInAnonymously(auth);
+                    }
+                } catch (authError) {
+                    // Se a autenticação falhar, usamos um ID aleatório (para continuar, mas sem login)
+                    console.error("Erro na autenticação. Usando ID aleatório:", authError);
+                    userId = crypto.randomUUID(); 
+                    isAuthReady = true;
+                    showError(`Aviso de Autenticação: Login falhou (${authError.message.substring(0, 30)}...). Usando ID anônimo: ${userId.substring(0, 8)}...`);
                 }
                 
-                if (userCredential && userCredential.user) {
-                    userId = userCredential.user.uid;
-                    UI.userId.textContent = userId;
-                    isAuthReady = true;
-                    console.log("Firebase e Autenticação prontos. User ID:", userId);
-                    
-                    UI.miningStatus.textContent = '3. Conectado ao DB. Configurando Chain...';
-                    
-                    // 2. Inicialização do Gênese e Listener do DB
-                    await setupGenesisBlockAndListener();
-                    
-                    // Se chegou até aqui, a carteira está pronta
-                    stopMining(); 
-                    
-                } else {
-                    throw new Error("Falha ao obter credenciais de usuário após o login.");
+                // Tenta usar o UID do Firebase ou o ID aleatório
+                userId = userCredential?.user?.uid || userId;
+
+                if (!userId) {
+                     // Se ainda não tivermos um userId, é uma falha de ambiente grave.
+                     throw new Error("Falha ao obter um User ID (autenticado ou anônimo).");
                 }
+                
+                UI.userId.textContent = userId;
+                isAuthReady = true;
+
+                console.log("Firebase conectado e ID de usuário definido:", userId);
+                
+                UI.miningStatus.textContent = '3. Conectado ao DB. Configurando Chain...';
+                
+                // 2. Inicialização do Gênese e Listener do DB
+                await setupGenesisBlockAndListener();
+                
+                // Se chegou até aqui, a carteira está pronta
+                stopMining(); 
 
             } catch (error) {
-                console.error("Erro ao inicializar Firebase:", error);
-                UI.miningStatus.textContent = `❌ Erro: ${error.message.substring(0, 50)}...`;
+                console.error("Erro FATAL na inicialização do Firebase/Autenticação:", error);
+                UI.miningStatus.textContent = `❌ Erro Fatal: ${error.message.substring(0, 50)}...`;
                 UI.miningToggleBtn.textContent = 'Falha Crítica';
                 UI.miningToggleBtn.disabled = true;
-                showError(`Falha na Inicialização (Etapa 1-2): ${error.message}`);
+                showError(`Falha Crítica (Etapa 1-2): ${error.message}.`);
             }
         }
         
@@ -224,10 +237,8 @@
                         resolve({ kSecreta, tentativas });
                     } else if (endK < maxK) {
                         UI.miningProgress.textContent = `Tentativas: ${tentativas.toLocaleString()}`;
-                        // Continuar a busca no próximo tick do evento loop
                         setTimeout(runSearch, 0); 
                     } else {
-                        // Se atingir o limite, resetar e tentar de novo, ou parar
                         resolve(null); 
                     }
                 }
@@ -279,7 +290,6 @@
 
             try {
                 // Tenta salvar no Firestore
-                // O ID do documento é o ID_BLOCO (string)
                 await setDoc(doc(db, COLLECTION_PATH, String(novoId)), novoBlocoDados);
 
                 console.log(`✅ Bloco ${novoId} criado e salvo. Hash: ${hashFinal}`);
@@ -388,7 +398,6 @@
 
         async function setupGenesisBlockAndListener() {
             // 1. Verificar Gênese
-            // Usando GENESIS_ID como string ('0')
             const genesisRef = doc(db, COLLECTION_PATH, GENESIS_ID);
             
             try {
@@ -416,7 +425,6 @@
                 }
 
                 // 2. Configurar Listener de Blocos (Em tempo real)
-                // Ordenar por 'timestamp'
                 const q = query(collection(db, COLLECTION_PATH), orderBy("timestamp", "desc"), limit(100)); 
                 
                 onSnapshot(q, (snapshot) => {
@@ -435,7 +443,7 @@
                         }
 
                         if (data.MINERADOR_ID === userId) {
-                            tempBalance += parseFloat(data.RECOMPENSA_MINERACAO || 0.0);
+                            tempBalance += parseFloat(data.RECOMPENSAA_MINERACAO || 0.0);
                         }
                         
                         blocks.push(data);
@@ -458,10 +466,6 @@
                     }
                     
                     UI.miningStatus.textContent = latestBlockId >= 0 ? "Pronto para Minerarrr! ⛏️" : "Aguardando Bloco Gênese...";
-                    // Limpa a lista de blocos se ainda estiver mostrando a mensagem de carregamento.
-                    if(latestBlockId >= 0) {
-                         UI.blockList.querySelector('p').remove();
-                    }
 
                 }, (error) => {
                     console.error("Erro no listener do Firestore:", error);
